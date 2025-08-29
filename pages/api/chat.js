@@ -7,28 +7,25 @@ const client = new OpenAI({
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed. Use POST." });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const { message } = req.body;
 
-    if (!message || message.trim() === "") {
-      return res.status(400).json({ error: "Message is required." });
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
     }
 
-    const response = await client.responses.create({
-      model: "gpt-5-mini", // You can swap this to gpt-5
-      input: message,
+    const response = await client.chat.completions.create({
+      model: "gpt-5-mini", // lightweight model
+      messages: [{ role: "user", content: message }],
     });
 
-    const reply =
-      response.output?.[0]?.content?.[0]?.text ||
-      "Sorry, I couldn’t generate a response.";
-
+    const reply = response.choices[0]?.message?.content?.trim() || "No reply";
     res.status(200).json({ reply });
   } catch (error) {
-    console.error("Chat API error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("API Error:", error);
+    res.status(500).json({ error: "Failed to connect to OpenAI API" });
   }
 }
