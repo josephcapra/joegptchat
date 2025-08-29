@@ -17,12 +17,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    const response = await client.chat.completions.create({
-      model: "gpt-5-mini", // lightweight model
-      messages: [{ role: "user", content: message }],
+    // ✅ Responses API (replacement for Assistants)
+    const response = await client.responses.create({
+      model: "gpt-4o-mini", // lightweight + fast
+      input: [
+        {
+          role: "user",
+          content: message,
+        },
+      ],
     });
 
-    const reply = response.choices[0]?.message?.content?.trim() || "No reply";
+    // Extract text reply safely
+    const reply =
+      response.output?.[0]?.content?.[0]?.text || "⚠️ No response from model";
+
     res.status(200).json({ reply });
   } catch (error) {
     console.error("API Error:", error);
