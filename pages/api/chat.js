@@ -12,7 +12,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ✅ Base search URL
+// ✅ Clean base search URL
 const BASE_URL = "https://paradiserealtyfla.com/search/results/?";
 
 function buildUrl(filters = {}) {
@@ -28,7 +28,7 @@ function buildUrl(filters = {}) {
 // 🔎 Query Supabase for a matching community
 async function getCommunityLink(userQuery) {
   const { data, error } = await supabase
-    .from("communities2") // <-- table with your community data
+    .from("communities2") // adjust table name if different
     .select("community_name_city, url")
     .ilike("community_name_city", `%${userQuery}%`)
     .limit(1);
@@ -65,8 +65,6 @@ export default async function handler(req, res) {
     }
 
     // 2️⃣ Otherwise, parse into RealGeeks search filters
-
-    // Price parsing
     const priceMatch = q.match(/under\s*\$?(\d+[kK]?)/);
     if (priceMatch) {
       let max = priceMatch[1].replace(/k/i, "000");
@@ -78,13 +76,12 @@ export default async function handler(req, res) {
       filters.list_price_max = parseInt(rangeMatch[2].replace(/k/i, "000"));
     }
 
-    // Beds / baths
     const bedsMatch = q.match(/(\d+)\s*(bed|br)/);
     if (bedsMatch) filters.beds_min = parseInt(bedsMatch[1]);
+
     const bathsMatch = q.match(/(\d+)\s*(bath|ba)/);
     if (bathsMatch) filters.baths_min = parseInt(bathsMatch[1]);
 
-    // Cities
     if (q.includes("port st lucie") || q.includes("psl")) {
       filters.county = "St. Lucie";
       filters.city = "Port St. Lucie";
@@ -99,17 +96,14 @@ export default async function handler(req, res) {
       filters.city = "West Palm Beach";
     }
 
-    // 55+ / senior
     if (q.includes("55+") || q.includes("senior")) {
       filters.senior_community_yn = true;
     }
 
-    // Pool
     if (q.includes("pool")) {
       filters.pool = true;
     }
 
-    // Waterfront
     if (
       q.includes("waterfront") ||
       q.includes("canal") ||
@@ -120,8 +114,9 @@ export default async function handler(req, res) {
       filters.waterfront = true;
     }
 
-    let url = buildUrl(filters);
+    const url = buildUrl(filters);
 
+    // ✅ Always return clickable Markdown link
     return res.status(200).json({
       reply: `Here are listings matching "${message}":\n\n👉 [View Listings](${url})`,
       url,
