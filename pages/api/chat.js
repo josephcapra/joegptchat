@@ -1,6 +1,7 @@
 import { OpenAI } from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { phraseToParams, buildSearchUrl } from "../../lib/searchLogic";
+import { formatSearchResponse } from "../../lib/responseFormatter";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(
@@ -17,7 +18,7 @@ export default async function handler(req, res) {
 
     let reply;
 
-    // 1️⃣ Check Supabase first
+    // 1️⃣ Supabase community first
     const { data: communityMatch } = await supabase
       .from("community_links")
       .select("url")
@@ -25,30 +26,29 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (communityMatch?.url) {
-      reply = `
-        Here’s the official community page:<br>
-        <a href="${communityMatch.url}" target="_blank"
-           style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">👉 View Listings</a>
-        <br><small>${communityMatch.url}</small>
-      `;
+      reply = formatSearchResponse(communityMatch.url, "👉 Official Community Listings");
     } else {
-      // 2️⃣ Otherwise Real Geeks logic
+      // 2️⃣ Real Geeks logic
       const params = phraseToParams(message);
       if (params) {
-        const url = buildSearchUrl("", params);
-        reply = `
-          Here are some listings I found:<br>
-          <a href="${url}" target="_blank"
-             style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">👉 View Listings</a>
-          <br><small>${url}</small>
-        `;
+        const url = buildSearchUrl("https://paradiserealtyfla.com/search/results/?", params);
+        reply = formatSearchResponse(url, "👉 View Listings");
       } else {
-        // 3️⃣ Fallback GPT
+        // 3️⃣ GPT fallback, but **force ParadiseRealtyFLA.com**
         const response = await client.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "user", content: message }],
+          messages: [
+            {
+              role: "system",
+              content: "You are JoeGPT, a real estate assistant. Only provide links from paradiserealtyfla.com. Never mention Zillow, Realtor.com, Redfin, or other brokerages.",
+            },
+            { role: "user", content: message },
+          ],
         });
-        reply = response.choices[0]?.message?.content?.trim() || "No reply";
+        const gptText = response.choices[0]?.message?.content?.trim() || "No reply";
+
+        // Force safe reply wrapper
+        reply = `${gptText}<br>${formatSearchResponse("https://paradiserealtyfla.com/search/results/?county=St.+Lucie&city=all", "👉 Browse Listings")}`;
       }
     }
 
