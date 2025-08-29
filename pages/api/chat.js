@@ -1,19 +1,19 @@
 import { v4 as uuidv4 } from "uuid";
 
-// Allowed domains
 const allowedOrigins = [
   "https://paradiserealtyfla.com",
   "https://paradiserealtyfla.realgeeks.com",
-  "http://localhost:3000", // for testing locally
+  "http://localhost:3000"
 ];
 
 export default async function handler(req, res) {
   const origin = req.headers.origin;
 
-  // ✅ Add CORS headers
-  if (allowedOrigins.includes(origin)) {
+  // ✅ Allow wildcard match for RealGeeks + Paradise Realty
+  if (origin && (origin.includes("paradiserealtyfla.com") || origin.includes("realgeeks.com") || origin.includes("localhost"))) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
+
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
@@ -21,12 +21,11 @@ export default async function handler(req, res) {
     "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
   );
 
-  // ✅ Handle preflight request
+  // ✅ Handle preflight
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  // ✅ Only allow POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -35,7 +34,7 @@ export default async function handler(req, res) {
     const { message, threadId } = req.body;
 
     // --------------------------------------
-    // 🔍 Example Search Logic (replace later with full parser)
+    // Example search logic
     // --------------------------------------
     let county = "St.+Lucie";
     let city = "Port+St.+Lucie";
@@ -51,14 +50,11 @@ export default async function handler(req, res) {
 
     const searchUrl = `https://paradiserealtyfla.com/search/results/?county=${county}&city=${city}${maxPrice}`;
 
-    // --------------------------------------
-    // ✅ Response with clickable button + raw link
-    // --------------------------------------
     return res.status(200).json({
       threadId: threadId || uuidv4(),
       reply: `
         Here are some listings I found:<br><br>
-        <a href="${searchUrl}" target="_blank" 
+        <a href="${searchUrl}" target="_blank"
           style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">
           🔗 View Listings
         </a>
