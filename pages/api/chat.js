@@ -1,4 +1,6 @@
-// pages/api/chat.js
+// /pages/api/chat.js
+import { NextResponse } from "next/server";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -6,84 +8,77 @@ export default async function handler(req, res) {
 
   try {
     const { message } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: "Message is required" });
+    if (!message) return res.status(400).json({ error: "Message required" });
+
+    let url = "https://paradiserealtyfla.realgeeks.com/search/results/?";
+    let reply = "Here are listings that may help:";
+
+    // Defaults
+    let params = {
+      county: "St. Lucie",
+      city: "Port St. Lucie",
+      subdivision: "all",
+      type: "res",
+      list_price_min: 50000,
+      list_price_max: 7000000,
+      beds_min: 2,
+      baths_min: 1,
+    };
+
+    // Price parsing
+    const priceMatch = message.match(/\$?(\d{2,3}k|\d{3,})(?:\s*-\s*\$?(\d{2,3}k|\d{3,}))?/i);
+    if (priceMatch) {
+      let min = priceMatch[1].replace("k", "000");
+      let max = priceMatch[2] ? priceMatch[2].replace("k", "000") : params.list_price_max;
+      params.list_price_min = parseInt(min);
+      params.list_price_max = parseInt(max);
     }
 
-    const baseUrl = "https://paradiserealtyfla.realgeeks.com/search/results/";
-    const params = new URLSearchParams();
+    // Beds
+    const bedsMatch = message.match(/(\d+)\s*(?:beds?|bedrooms?)/i);
+    if (bedsMatch) params.beds_min = parseInt(bedsMatch[1]);
 
-    // Default property types
-    ["res", "con", "twn", "lnd", "mul"].forEach(t => params.append("type", t));
-    params.set("list_price_min", "50000");
-    params.set("list_price_max", "7000000");
+    // Baths
+    const bathsMatch = message.match(/(\d+)\s*(?:baths?|bathrooms?)/i);
+    if (bathsMatch) params.baths_min = parseInt(bathsMatch[1]);
 
-    // ---- Price ----
-    const underMatch = message.match(/under\s*\$?([\d,]+)/i);
-    if (underMatch) params.set("list_price_max", underMatch[1].replace(/,/g, ""));
-    const rangeMatch = message.match(/\$?([\d,]+)\s*(to|-)\s*\$?([\d,]+)/i);
-    if (rangeMatch) {
-      params.set("list_price_min", rangeMatch[1].replace(/,/g, ""));
-      params.set("list_price_max", rangeMatch[3].replace(/,/g, ""));
+    // 55+ / retirement
+    if (/55\+|retire|senior/i.test(message)) params.senior_community_yn = true;
+
+    // Waterfront
+    if (/waterfront|lake|river|canal|ocean/i.test(message)) params.waterfront = true;
+
+    // Pool
+    if (/pool/i.test(message)) params.pool = true;
+
+    // City / County mapping
+    if (/stuart/i.test(message)) {
+      params.city = "Stuart";
+      params.county = "Martin";
+    } else if (/jupiter/i.test(message)) {
+      params.city = "Jupiter";
+      params.county = "Palm Beach";
+    } else if (/fort pierce/i.test(message)) {
+      params.city = "Fort Pierce";
+      params.county = "St. Lucie";
+    } else if (/palm beach/i.test(message)) {
+      params.city = "West Palm Beach";
+      params.county = "Palm Beach";
     }
 
-    // ---- Beds / Baths ----
-    const bedsMatch = message.match(/(\d+)\s*(bed|bedroom)/i);
-    if (bedsMatch) params.set("beds_min", bedsMatch[1]);
-    const bathsMatch = message.match(/(\d+)\s*(bath|bathroom)/i);
-    if (bathsMatch) params.set("baths_min", bathsMatch[1]);
+    // Build query string
+    const queryString = Object.entries(params)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
 
-    // ---- Year Built ----
-    const yearMatch = message.match(/built\s*(after|since)?\s*(\d{4})/i);
-    if (yearMatch) params.set("year_built_min", yearMatch[2]);
-
-    // ---- Sqft ----
-    const sqftMatch = message.match(/(\d{3,5})\s*(sqft|square feet)/i);
-    if (sqftMatch) params.set("area_min", sqftMatch[1]);
-
-    // ---- Acres ----
-    const acreMatch = message.match(/(\d+(\.\d+)?)\s*acre/i);
-    if (acreMatch) params.set("acres_min", acreMatch[1]);
-
-    // ---- City / County ----
-    if (/port st lucie|psl/i.test(message)) params.set("city", "Port St. Lucie");
-    if (/stuart/i.test(message)) params.set("city", "Stuart");
-    if (/jupiter/i.test(message)) params.set("city", "Jupiter");
-    if (/martin/i.test(message)) params.set("county", "Martin");
-    if (/palm beach/i.test(message)) params.set("county", "Palm Beach");
-
-    // ---- Features ----
-    if (/pool/i.test(message)) params.set("pool", "True");
-    if (/waterfront/i.test(message)) params.set("waterfront", "True");
-    if (/55/i.test(message)) params.set("senior_community_yn", "True");
-    if (/hoa/i.test(message)) params.set("hoa_yn", "True");
-
-    // ---- HOA Fee ----
-    const hoaMatch = message.match(/hoa.*under\s*\$?([\d,]+)/i);
-    if (hoaMatch) params.set("hoa_fee_max", hoaMatch[1].replace(/,/g, ""));
-
-    // ---- Garage ----
-    const garageMatch = message.match(/(\d+)\s*(car|garage)/i);
-    if (garageMatch) params.set("garage_spaces_min", garageMatch[1]);
-
-    // ---- Views ----
-    if (/ocean/i.test(message)) params.append("view", "Ocean");
-    if (/lake/i.test(message)) params.append("view", "Lake");
-    if (/golf/i.test(message)) params.append("view", "Golf Course");
-
-    // ---- Roof ----
-    if (/tile roof/i.test(message)) params.append("roof", "Tile");
-    if (/metal roof/i.test(message)) params.append("roof", "Metal");
-
-    const url = `${baseUrl}?${params.toString()}`;
+    url += queryString;
 
     return res.status(200).json({
-      reply: `Here are listings matching "${message}":`,
-      url,
+      reply: reply,
+      url: url,
     });
-
-  } catch (err) {
-    console.error("Search API error:", err);
-    res.status(500).json({ error: "Failed to build search URL" });
+  } catch (error) {
+    console.error("Chat error:", error);
+    return res.status(500).json({ error: "Server error" });
   }
 }
