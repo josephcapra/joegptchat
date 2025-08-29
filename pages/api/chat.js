@@ -1,24 +1,44 @@
 // pages/api/chat.js
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
+
+// 🔑 Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ✅ Your clean base URL
+// ✅ Base search URL
 const BASE_URL = "https://paradiserealtyfla.com/search/results/?";
 
 function buildUrl(filters = {}) {
   const url = new URL(BASE_URL);
-
-  // Apply overrides on top of base
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       url.searchParams.set(key, value.toString());
     }
   });
-
   return url.toString();
+}
+
+// 🔎 Query Supabase for a matching community
+async function getCommunityLink(userQuery) {
+  const { data, error } = await supabase
+    .from("communities2") // <-- table with your community data
+    .select("community_name_city, url")
+    .ilike("community_name_city", `%${userQuery}%`)
+    .limit(1);
+
+  if (error) {
+    console.error("Supabase error:", error);
+    return null;
+  }
+
+  return data?.[0]?.url || null;
 }
 
 export default async function handler(req, res) {
@@ -33,53 +53,75 @@ export default async function handler(req, res) {
     }
 
     const q = message.toLowerCase();
-    let url = BASE_URL;
+    let filters = {};
 
-    // 🔎 Custom logic for common searches
-    if (q.includes("under 400k") && q.includes("psl")) {
-      url = buildUrl({
-        county: "St. Lucie",
-        city: "Port St. Lucie",
-        list_price_max: 400000,
-      });
-    } else if (q.includes("55+") || q.includes("senior")) {
-      url = buildUrl({
-        county: "St. Lucie",
-        city: "Port St. Lucie",
-        senior_community_yn: true,
-      });
-    } else if (q.includes("new construction") && q.includes("martin")) {
-      url = buildUrl({
-        county: "Martin",
-        year_built_min: 2020,
-      });
-    } else if (q.includes("waterfront") && q.includes("west palm")) {
-      url = buildUrl({
-        county: "Palm Beach",
-        city: "West Palm Beach",
-        waterfront: true,
-      });
-    } else {
-      // 🧠 Fallback: use GPT to generate a search description
-      const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a real estate search assistant. 
-            Convert queries into property searches using paradiserealtyfla.com.`,
-          },
-          { role: "user", content: message },
-        ],
-      });
-
-      const reply = response.choices[0]?.message?.content?.trim() || "Here are some homes you may like:";
+    // 1️⃣ First, check if it's a community request
+    const communityUrl = await getCommunityLink(message);
+    if (communityUrl) {
       return res.status(200).json({
-        reply: `${reply}\n\n👉 [View Listings](${BASE_URL})`,
+        reply: `Here are listings in ${message}:\n\n👉 [View Listings](${communityUrl})`,
+        url: communityUrl,
       });
     }
 
-    // ✅ Always return clickable link
+    // 2️⃣ Otherwise, parse into RealGeeks search filters
+
+    // Price parsing
+    const priceMatch = q.match(/under\s*\$?(\d+[kK]?)/);
+    if (priceMatch) {
+      let max = priceMatch[1].replace(/k/i, "000");
+      filters.list_price_max = parseInt(max);
+    }
+    const rangeMatch = q.match(/\$?(\d+[kK]?)\s*-\s*\$?(\d+[kK]?)/);
+    if (rangeMatch) {
+      filters.list_price_min = parseInt(rangeMatch[1].replace(/k/i, "000"));
+      filters.list_price_max = parseInt(rangeMatch[2].replace(/k/i, "000"));
+    }
+
+    // Beds / baths
+    const bedsMatch = q.match(/(\d+)\s*(bed|br)/);
+    if (bedsMatch) filters.beds_min = parseInt(bedsMatch[1]);
+    const bathsMatch = q.match(/(\d+)\s*(bath|ba)/);
+    if (bathsMatch) filters.baths_min = parseInt(bathsMatch[1]);
+
+    // Cities
+    if (q.includes("port st lucie") || q.includes("psl")) {
+      filters.county = "St. Lucie";
+      filters.city = "Port St. Lucie";
+    } else if (q.includes("stuart")) {
+      filters.county = "Martin";
+      filters.city = "Stuart";
+    } else if (q.includes("jupiter")) {
+      filters.county = "Palm Beach";
+      filters.city = "Jupiter";
+    } else if (q.includes("west palm")) {
+      filters.county = "Palm Beach";
+      filters.city = "West Palm Beach";
+    }
+
+    // 55+ / senior
+    if (q.includes("55+") || q.includes("senior")) {
+      filters.senior_community_yn = true;
+    }
+
+    // Pool
+    if (q.includes("pool")) {
+      filters.pool = true;
+    }
+
+    // Waterfront
+    if (
+      q.includes("waterfront") ||
+      q.includes("canal") ||
+      q.includes("lake") ||
+      q.includes("ocean") ||
+      q.includes("river")
+    ) {
+      filters.waterfront = true;
+    }
+
+    let url = buildUrl(filters);
+
     return res.status(200).json({
       reply: `Here are listings matching "${message}":\n\n👉 [View Listings](${url})`,
       url,
