@@ -11,15 +11,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message } = req.body;
+    const { message, threadId } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // ✅ Responses API (replacement for Assistants)
+    // ✅ Use Responses API
     const response = await client.responses.create({
-      model: "gpt-4o-mini", // lightweight + fast
+      model: "gpt-4o-mini",
       input: [
         {
           role: "user",
@@ -28,11 +28,15 @@ export default async function handler(req, res) {
       ],
     });
 
-    // Extract text reply safely
+    // Extract text
     const reply =
       response.output?.[0]?.content?.[0]?.text || "⚠️ No response from model";
 
-    res.status(200).json({ reply });
+    // Send back reply + threadId for compatibility
+    res.status(200).json({
+      reply,
+      threadId: threadId || "demo-thread", // fallback threadId
+    });
   } catch (error) {
     console.error("API Error:", error);
     res.status(500).json({ error: "Failed to connect to OpenAI API" });
