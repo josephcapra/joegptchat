@@ -1,70 +1,73 @@
-// pages/api/chat.js
+import { v4 as uuidv4 } from "uuid";
 
-import { OpenAI } from "openai";
-import { phraseToFilters, buildSearchUrl } from "../../lib/searchLogic.js";
-// If Supabase is connected later:
-// import { createClient } from "@supabase/supabase-js";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// const supabase = createClient(
-//   process.env.NEXT_PUBLIC_SUPABASE_URL,
-//   process.env.SUPABASE_SERVICE_ROLE_KEY
-// );
+// Allowed domains
+const allowedOrigins = [
+  "https://paradiserealtyfla.com",
+  "https://paradiserealtyfla.realgeeks.com",
+  "http://localhost:3000", // for testing locally
+];
 
 export default async function handler(req, res) {
+  const origin = req.headers.origin;
+
+  // ✅ Add CORS headers
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
+  );
+
+  // ✅ Handle preflight request
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  // ✅ Only allow POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ error: "Message required" });
+    const { message, threadId } = req.body;
 
-    let reply;
+    // --------------------------------------
+    // 🔍 Example Search Logic (replace later with full parser)
+    // --------------------------------------
+    let county = "St.+Lucie";
+    let city = "Port+St.+Lucie";
+    let maxPrice = "";
 
-    // 1️⃣ TODO: Supabase check (if community tables are connected)
-    // const { data: communityMatch } = await supabase
-    //   .from("community_links")
-    //   .select("url")
-    //   .ilike("community_name", `%${message}%`)
-    //   .maybeSingle();
-    //
-    // if (communityMatch?.url) {
-    //   reply = formatReply(communityMatch.url, "👉 Official Community Listings");
-    //   return res.status(200).json({ reply });
-    // }
+    if (/under\s*\$?400k/i.test(message)) {
+      maxPrice = "&list_price_max=400000";
+    }
+    if (/Hobe Sound/i.test(message)) {
+      city = "Hobe+Sound";
+      county = "Martin";
+    }
 
-    // 2️⃣ Real Geeks search logic
-    const filters = phraseToFilters(message);
-    const url = buildSearchUrl(filters);
+    const searchUrl = `https://paradiserealtyfla.com/search/results/?county=${county}&city=${city}${maxPrice}`;
 
-    reply = formatReply(url, "👉 View Listings");
-
-    return res.status(200).json({ reply });
-  } catch (error) {
-    console.error("Chat API error:", error);
+    // --------------------------------------
+    // ✅ Response with clickable button + raw link
+    // --------------------------------------
+    return res.status(200).json({
+      threadId: threadId || uuidv4(),
+      reply: `
+        Here are some listings I found:<br><br>
+        <a href="${searchUrl}" target="_blank" 
+          style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">
+          🔗 View Listings
+        </a>
+        <br><br>
+        <small>${searchUrl}</small>
+      `,
+    });
+  } catch (err) {
+    console.error("Chat API error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
-}
-
-// ✅ Always return clickable button + raw URL
-function formatReply(url, label = "👉 View Listings") {
-  // Force only your domain
-  if (!url.includes("paradiserealtyfla.com")) {
-    return "⚠️ Sorry, I can only provide listings from ParadiseRealtyFLA.com.";
-  }
-
-  return `
-    <div>
-      <a href="${url}" target="_blank"
-         style="display:inline-block; background:#00796b; color:white; padding:10px 16px; 
-                border-radius:6px; text-decoration:none; font-weight:bold; margin:6px 0;">
-         ${label}
-      </a>
-      <br><small>${url}</small>
-    </div>
-  `;
 }
