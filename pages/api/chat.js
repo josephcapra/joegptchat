@@ -6,37 +6,34 @@ const client = new OpenAI({
 });
 
 export default async function handler(req, res) {
+  // ✅ Allow CORS for RealGeeks (replace * with your domain for security)
+  res.setHeader("Access-Control-Allow-Origin", "*"); 
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end(); // ✅ Handle preflight CORS check
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { message, threadId } = req.body;
+    const { message } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // ✅ Use Responses API
-    const response = await client.responses.create({
-      model: "gpt-4o-mini",
-      input: [
-        {
-          role: "user",
-          content: message,
-        },
-      ],
+    // ✅ Call OpenAI
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",  // small fast model
+      messages: [{ role: "user", content: message }],
     });
 
-    // Extract text
-    const reply =
-      response.output?.[0]?.content?.[0]?.text || "⚠️ No response from model";
-
-    // Send back reply + threadId for compatibility
-    res.status(200).json({
-      reply,
-      threadId: threadId || "demo-thread", // fallback threadId
-    });
+    const reply = response.choices[0]?.message?.content?.trim() || "No reply";
+    res.status(200).json({ reply });
   } catch (error) {
     console.error("API Error:", error);
     res.status(500).json({ error: "Failed to connect to OpenAI API" });
