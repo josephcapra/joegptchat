@@ -1,192 +1,144 @@
 // pages/api/chat.js
+import { OpenAI } from "openai";
 import { createClient } from "@supabase/supabase-js";
-import { v4 as uuidv4 } from "uuid";
 
-// Connect Supabase
+// ✅ Setup OpenAI + Supabase
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Base Real Geeks search URL
-const BASE_URL = "https://paradiserealtyfla.com/search/results/";
+// ✅ Utility: Clean URL encoding
+function buildSearchUrl(base, params) {
+  return (
+    base +
+    params
+      .replace(/\s+/g, "+")
+      .replace(/%20/g, "+")
+      .replace(/%2B/g, "+")
+      .replace(/%2F/g, "/")
+      .replace(/%26/g, "&")
+      .replace(/%3D/g, "=")
+  );
+}
 
+const BASE_URL = "https://paradiserealtyfla.com/search/results/?";
+
+// ✅ Map natural phrases → search params
+function phraseToParams(query) {
+  query = query.toLowerCase();
+  let params = [];
+
+  // Geography
+  if (query.includes("port st lucie")) params.push("county=all&city=Port+St.+Lucie");
+  if (query.includes("st lucie county")) params.push("county=St.+Lucie&city=all");
+  if (query.includes("fort pierce")) params.push("county=all&city=Fort+Pierce");
+  if (query.includes("hobe sound")) params.push("county=all&city=Hobe+Sound");
+
+  // Price
+  if (query.includes("under 300k")) params.push("list_price_max=300000");
+  if (query.includes("under 400k")) params.push("list_price_max=400000");
+  if (query.includes("under 500k")) params.push("list_price_max=500000");
+  if (query.includes("over 1m")) params.push("list_price_min=1000000");
+  if (query.includes("between 500k and 750k"))
+    params.push("list_price_min=500000&list_price_max=750000");
+
+  // Property type
+  if (query.includes("single family")) params.push("type=res");
+  if (query.includes("condo")) params.push("type=con");
+  if (query.includes("townhome") || query.includes("townhouse")) params.push("type=twn");
+  if (query.includes("multi-family")) params.push("type=mul");
+  if (query.includes("land")) params.push("type=lnd");
+
+  // Beds & baths
+  if (query.includes("2 bed")) params.push("beds_min=2");
+  if (query.includes("3 bed")) params.push("beds_min=3");
+  if (query.includes("4 bed")) params.push("beds_min=4");
+  if (query.includes("2 bath")) params.push("baths_min=2");
+  if (query.includes("3 bath")) params.push("baths_min=3");
+
+  // Lifestyle
+  if (query.includes("pool")) params.push("pool=True");
+  if (query.includes("55+")) params.push("senior_community_yn=True");
+  if (query.includes("waterfront")) params.push("waterfront=True");
+  if (query.includes("oceanfront")) params.push("waterfront=Ocean+Front");
+  if (query.includes("riverfront")) params.push("waterfront=River+Front");
+  if (query.includes("lakefront")) params.push("waterfront=Lake+Front");
+
+  // HOA
+  if (query.includes("no hoa")) params.push("hoa_yn=False");
+  if (query.includes("hoa under 300")) params.push("hoa_yn=True&hoa_fee_max=300");
+  if (query.includes("hoa under 500")) params.push("hoa_yn=True&hoa_fee_max=500");
+  if (query.includes("gated")) params.push("hoa_yn=True&hoa_fee_includes=Security");
+
+  // Year built
+  if (query.includes("built after 2015")) params.push("year_built_min=2015");
+  if (query.includes("built after 2018")) params.push("year_built_min=2018");
+  if (query.includes("new construction")) params.push("year_built_min=2020");
+
+  // Garage
+  if (query.includes("2 car garage")) params.push("garage_spaces_min=2");
+  if (query.includes("3 car garage")) params.push("garage_spaces_min=3");
+
+  return params.join("&");
+}
+
+// ✅ API Handler
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { message, threadId } = req.body;
-  if (!message) {
-    return res.status(400).json({ error: "Message is required" });
-  }
-
   try {
-    let params = new URLSearchParams();
-    const lower = message.toLowerCase();
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
 
-    // ===========================================
-    // 1. Supabase Community Match First
-    // ===========================================
+    let reply;
+
+    // 1️⃣ Check Supabase first for community link
     const { data: communityMatch } = await supabase
       .from("community_links")
       .select("url")
       .ilike("community_name", `%${message}%`)
       .maybeSingle();
 
-    if (communityMatch) {
-      return res.status(200).json({
-        reply: `🏡 Found community match: <a href="${communityMatch.url}" target="_blank">View Listings Here</a>`,
-        threadId: threadId || uuidv4(),
-      });
-    }
-
-    // ===========================================
-    // 2. Geography (county & city)
-    // ===========================================
-    const geoMap = {
-      "st. lucie county": { county: "St.+Lucie", city: "all" },
-      "port st. lucie": { county: "all", city: "Port+St.+Lucie" },
-      "fort pierce": { county: "all", city: "Fort+Pierce" },
-      "palm city": { county: "all", city: "Palm+City" },
-      "hobe sound": { county: "all", city: "Hobe+Sound" },
-    };
-
-    for (let key in geoMap) {
-      if (lower.includes(key)) {
-        params.set("county", geoMap[key].county);
-        params.set("city", geoMap[key].city);
+    if (communityMatch?.url) {
+      reply = `
+        Here’s the official community page:<br>
+        <a href="${communityMatch.url}" target="_blank" 
+           style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">👉 View Listings</a>
+        <br><small>${communityMatch.url}</small>
+      `;
+    } else {
+      // 2️⃣ Otherwise build Real Geeks search URL
+      const params = phraseToParams(message);
+      if (params) {
+        const url = buildSearchUrl(BASE_URL, params);
+        reply = `
+          Here are some listings I found:<br>
+          <a href="${url}" target="_blank" 
+             style="display:inline-block; background:#00796b; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">👉 View Listings</a>
+          <br><small>${url}</small>
+        `;
+      } else {
+        // 3️⃣ Fallback: GPT answer
+        const response = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: message }],
+        });
+        reply = response.choices[0]?.message?.content?.trim() || "No reply";
       }
     }
 
-    // ===========================================
-    // 3. Price filters
-    // ===========================================
-    if (/under\s?300k/.test(lower)) params.set("list_price_max", "300000");
-    if (/under\s?400k/.test(lower)) params.set("list_price_max", "400000");
-    if (/under\s?500k/.test(lower)) params.set("list_price_max", "500000");
-    if (/over\s?1m/.test(lower)) params.set("list_price_min", "1000000");
-    if (/between\s?500k\s?and\s?750k/.test(lower)) {
-      params.set("list_price_min", "500000");
-      params.set("list_price_max", "750000");
-    }
-
-    // ===========================================
-    // 4. Property types
-    // ===========================================
-    const typeMap = {
-      "single family": "res",
-      "house": "res",
-      "condo": "con",
-      "townhome": "twn",
-      "townhouse": "twn",
-      "multi": "mul",
-      "multi-family": "mul",
-      "land": "lnd",
-      "vacant": "lnd",
-    };
-
-    for (let key in typeMap) {
-      if (lower.includes(key)) params.append("type", typeMap[key]);
-    }
-
-    // ===========================================
-    // 5. Beds & baths
-    // ===========================================
-    const bedMatch = lower.match(/(\d+)\s?(bed|br)/);
-    const bathMatch = lower.match(/(\d+)\s?(bath|ba)/);
-    if (bedMatch) params.set("beds_min", bedMatch[1]);
-    if (bathMatch) params.set("baths_min", bathMatch[1]);
-
-    // ===========================================
-    // 6. Size (SqFt, lot, acres)
-    // ===========================================
-    const sqftMatch = lower.match(/over\s?(\d+)\s?(sqft|square feet|sq ft)/);
-    if (sqftMatch) params.set("area_min", sqftMatch[1]);
-
-    if (lower.includes("quarter acre")) params.set("lot_dimensions", "1/4+Acre");
-    if (lower.includes("half acre")) params.set("acres_min", "0.5");
-    if (lower.includes("5 acres")) params.set("lot_dimensions", "5+Acres");
-
-    // ===========================================
-    // 7. Year Built
-    // ===========================================
-    const yearMatch = lower.match(/after\s?(20\d{2})/);
-    if (yearMatch) params.set("year_built_min", yearMatch[1]);
-
-    if (lower.includes("new construction")) {
-      params.set("year_built_min", "2020");
-    }
-
-    // ===========================================
-    // 8. Lifestyle features
-    // ===========================================
-    if (lower.includes("pool")) params.set("pool", "True");
-    if (lower.includes("55+")) params.set("senior_community_yn", "True");
-    if (lower.includes("waterfront")) params.set("waterfront", "True");
-    if (lower.includes("oceanfront")) params.set("waterfront", "Ocean+Front");
-    if (lower.includes("lakefront")) params.set("waterfront", "Lake+Front");
-    if (lower.includes("riverfront")) params.set("waterfront", "River+Front");
-
-    // ===========================================
-    // 9. HOA
-    // ===========================================
-    if (lower.includes("no hoa")) params.set("hoa_yn", "False");
-    if (lower.includes("hoa under 300")) {
-      params.set("hoa_yn", "True");
-      params.set("hoa_fee_max", "300");
-    }
-    if (lower.includes("hoa under 500")) {
-      params.set("hoa_yn", "True");
-      params.set("hoa_fee_max", "500");
-    }
-    if (lower.includes("gated")) {
-      params.set("hoa_yn", "True");
-      params.append("hoa_fee_includes", "Security");
-    }
-    if (lower.includes("lawn care"))
-      params.append("hoa_fee_includes", "Maintenance+Grounds");
-    if (lower.includes("cable"))
-      params.append("hoa_fee_includes", "Cable+TV");
-
-    // ===========================================
-    // 10. Garage
-    // ===========================================
-    const garageMatch = lower.match(/(\d)\s?(car garage)/);
-    if (garageMatch) params.set("garage_spaces_min", garageMatch[1]);
-
-    // ===========================================
-    // 11. Views
-    // ===========================================
-    if (lower.includes("golf view")) params.set("view", "Golf+Course");
-    if (lower.includes("lake view")) params.set("view", "Lake");
-    if (lower.includes("ocean view")) params.set("view", "Ocean");
-    if (lower.includes("preserve view")) params.set("view", "Preserve");
-    if (lower.includes("city view")) params.set("view", "City");
-
-    // ===========================================
-    // 12. Sorting
-    // ===========================================
-    if (lower.includes("cheapest")) params.set("sort_by", "price-asc");
-    if (lower.includes("most expensive")) params.set("sort_by", "price-desc");
-    if (lower.includes("newest")) params.set("sort_by", "date-desc");
-
-    // ===========================================
-    // Default Fallback
-    // ===========================================
-    if (![...params.keys()].length) {
-      params.set("county", "St.+Lucie");
-      params.set("city", "Port+St.+Lucie");
-    }
-
-    const url = `${BASE_URL}?${params.toString()}`;
-
-    return res.status(200).json({
-      reply: `Here are some listings I found:<br><a href="${url}" target="_blank">👉 View Listings</a>`,
-      threadId: threadId || uuidv4(),
-    });
+    return res.status(200).json({ reply });
   } catch (error) {
     console.error("API Error:", error);
-    return res.status(500).json({ error: "Failed to process request" });
+    return res.status(500).json({ error: "Failed to connect to API" });
   }
 }
