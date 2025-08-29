@@ -5,19 +5,6 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Base RealGeeks search URL
-const BASE_URL = "https://paradiserealtyfla.realgeeks.com/search/results/";
-
-function buildSearchUrl(params) {
-  const url = new URL(BASE_URL);
-  Object.keys(params).forEach(key => {
-    if (params[key] !== undefined && params[key] !== null) {
-      url.searchParams.set(key, params[key]);
-    }
-  });
-  return url.toString();
-}
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -30,59 +17,32 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    const q = message.toLowerCase();
+    // Base RealGeeks URL (adjust to your site’s domain if needed)
+    const baseUrl =
+      "https://paradiserealtyfla.realgeeks.com/search/results/?";
 
-    // 🔎 Hard-coded RealGeeks logic
-    if (q.includes("homes under $400k in psl") || q.includes("port st. lucie under 400k")) {
-      return res.json({
-        reply: `Here are homes under $400k in Port St. Lucie:\n${buildSearchUrl({
-          county: "St. Lucie",
-          city: "Port St. Lucie",
-          list_price_max: 400000,
-          beds_min: 2,
-          baths_min: 1
-        })}`
-      });
-    }
-
-    if (q.includes("55+") || q.includes("55 plus community") || q.includes("senior")) {
-      return res.json({
-        reply: `Here are 55+ Communities in PSL:\n${buildSearchUrl({
-          county: "St. Lucie",
-          city: "Port St. Lucie",
-          senior_community_yn: true
-        })}`
-      });
-    }
-
-    if (q.includes("new construction in martin")) {
-      return res.json({
-        reply: `Here are new construction homes in Martin County:\n${buildSearchUrl({
-          county: "Martin",
-          year_built_min: 2020
-        })}`
-      });
-    }
-
-    if (q.includes("waterfront homes in west palm")) {
-      return res.json({
-        reply: `Here are waterfront homes in West Palm Beach:\n${buildSearchUrl({
-          county: "Palm Beach",
-          city: "West Palm Beach",
-          waterfront: "True"
-        })}`
-      });
-    }
-
-    // 🧠 If no match, fall back to GPT for natural conversation
+    // Let GPT decide what filters should be applied
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini", // ✅ lightweight fast model
-      messages: [{ role: "user", content: message }],
+      model: "gpt-4o-mini", // ⚡ fast + cheaper
+      messages: [
+        {
+          role: "system",
+          content: `You are a real estate search assistant. 
+          Convert user queries into RealGeeks property search filters.
+          Always respond with a short intro sentence and a clickable URL link.`,
+        },
+        { role: "user", content: message },
+      ],
     });
 
-    const reply = response.choices[0]?.message?.content?.trim() || "No reply";
-    res.status(200).json({ reply });
+    let reply = response.choices[0]?.message?.content?.trim();
 
+    // If GPT doesn't generate a link, add a fallback generic URL
+    if (!reply.includes("http")) {
+      reply += `\n\n👉 [View Listings Here](${baseUrl})`;
+    }
+
+    res.status(200).json({ reply });
   } catch (error) {
     console.error("API Error:", error);
     res.status(500).json({ error: "Failed to connect to OpenAI API" });
