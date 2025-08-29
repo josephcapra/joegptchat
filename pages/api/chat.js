@@ -17,19 +17,24 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // Base RealGeeks URL (adjust to your site’s domain if needed)
+    // ✅ Base RealGeeks URL on your own domain
     const baseUrl =
-      "https://paradiserealtyfla.realgeeks.com/search/results/?";
+      "https://paradiserealtyfla.com/search/results/?";
 
-    // Let GPT decide what filters should be applied
+    // Let GPT turn queries into RealGeeks filters
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini", // ⚡ fast + cheaper
+      model: "gpt-4o-mini", // lightweight but accurate
       messages: [
         {
           role: "system",
-          content: `You are a real estate search assistant. 
-          Convert user queries into RealGeeks property search filters.
-          Always respond with a short intro sentence and a clickable URL link.`,
+          content: `You are a real estate assistant for Paradise Realty FLA. 
+          Convert user queries into RealGeeks property search URLs.
+          Always respond with:
+          1. A short intro sentence
+          2. A clickable link using the domain paradiserealtyfla.com
+          
+          Example format:
+          "Here are some homes you might like: 👉 [View Listings](https://paradiserealtyfla.com/search/results/?county=St.+Lucie&list_price_max=400000)"`,
         },
         { role: "user", content: message },
       ],
@@ -37,9 +42,9 @@ export default async function handler(req, res) {
 
     let reply = response.choices[0]?.message?.content?.trim();
 
-    // If GPT doesn't generate a link, add a fallback generic URL
+    // Fallback — in case GPT forgets to add a link
     if (!reply.includes("http")) {
-      reply += `\n\n👉 [View Listings Here](${baseUrl})`;
+      reply += `\n\n👉 [View Listings](${baseUrl})`;
     }
 
     res.status(200).json({ reply });
