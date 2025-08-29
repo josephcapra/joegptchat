@@ -1,41 +1,38 @@
+// pages/api/chat.js
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Vercel injects this from your env vars
+});
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({ error: "Method not allowed. Use POST." });
   }
 
   try {
-    const { message, thread } = req.body;
+    const { message } = req.body;
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-5",
-        input: [
-          { role: "system", content: "You are JoeGPT, a real estate assistant for Paradise Realty FLA. Always return direct ParadiseRealtyFLA.com links. Apply the full search logic when generating results." },
-          ...(thread || []),
-          { role: "user", content: message }
-        ]
-      })
+    if (!message || message.trim() === "") {
+      return res.status(400).json({ error: "Message is required." });
+    }
+
+    // Call OpenAI Responses API
+    const response = await client.responses.create({
+      model: "gpt-5-mini", // You can change to gpt-5 or gpt-4o depending on needs
+      input: message,
     });
 
-    const data = await response.json();
-    const reply = data.output?.[0]?.content?.[0]?.text || "⚠️ No response from JoeGPT";
+    // Extract reply safely
+    const reply =
+      response.output?.[0]?.content?.[0]?.text ||
+      "Sorry, I couldn’t generate a response.";
 
-    res.status(200).json({
-      reply,
-      thread: [
-        ...(thread || []),
-        { role: "user", content: message },
-        { role: "assistant", content: reply }
-      ]
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(200).json({ reply });
+  } catch (error) {
+    console.error("Chat API error:", error);
+    res
+      .status(500)
+      .json({ error: "Something went wrong. Check server logs for details." });
   }
 }
